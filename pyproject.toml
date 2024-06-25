@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "speckled"
+version = "0.1.0"
+description = "LLM + specs"
+authors = ["Craig Mulligan <git@craigmulligan.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+tarsier = "^0.6.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
