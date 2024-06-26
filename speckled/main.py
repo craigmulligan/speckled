@@ -6,6 +6,7 @@ from playwright.async_api import Browser, Page, async_playwright
 from tarsier import Tarsier, GoogleVisionOCRService
 import json
 
+import base64
 import instructor
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -25,12 +26,12 @@ system_prompt = """
         [@ID]: hyperlinks (<a> tags)
         [$ID]: other interactable elements (e.g. button, select)
 
-    After receiving the web page content. You must respond with an action which will help you complete the test. 
+    After receiving the web page content. You must respond with an action which will help you complete the test.
     You will then receive another web page and continue this process until you complete the test.
 
     If an instruction fails you will receive an error, to help you retry and correct your action.
 
-    You will judge if the test has passed or failed based on the contents of the incoming webpage. 
+    You will judge if the test has passed or failed based on the contents of the incoming webpage.
 
     - You should only respond with with an action in order to drive your test browser and complete the test.
     - You should keep tests short using as few instruction as possible to complete a test.
@@ -55,9 +56,9 @@ class TextInput(BaseModel):
 
 
 class KeyInput(BaseModel):
-    type: Literal["key_input"]
+    type: Literal["single_key_input"]
     id: int
-    key: Literal["Enter", "Tab"]
+    key: str
 
 
 class Message(BaseModel):
@@ -69,7 +70,19 @@ class Message(BaseModel):
 client = instructor.from_openai(OpenAI(api_key=config.OPENAI_API_KEY))
 
 
+def bytes_to_image_url(image: bytes):
+    # Convert the bytes object to a base64 encoded string
+    base64_encoded_str = base64.b64encode(image).decode("utf-8")
+
+    # Construct the data URL
+    mime_type = "image/png"  # Adjust this to the correct MIME type of your image
+    res = f"data:{mime_type};base64,{base64_encoded_str}"
+    print(res)
+    return res
+
+
 def load_ocr_credentials(json_file_path):
+    # To create the service account key, follow the instructions on this SO answer https://stackoverflow.com/a/46290808/1780891
     with open(json_file_path) as f:
         credentials = json.load(f)
     return credentials
@@ -100,12 +113,16 @@ class Agent:
                 raise Exception(f"Too many steps to execute spec: {spec_description}")
 
             await page.wait_for_timeout(500)
-            page_text, tag_to_xpath = await self.tarsier.page_to_text(page)
-            print("----")
-            print(page_text)
-            print("----")
+            screenshot, tag_to_xpath = await self.tarsier.page_to_image(page)
             await page.wait_for_timeout(500)
-            messages.append({"role": "user", "content": page_text})
+            image_url = bytes_to_image_url(screenshot)
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "image_url", "image_url": {"url": image_url}}],
+                }
+            )
 
             message = await self.ask_llm(messages)
 
@@ -117,9 +134,6 @@ class Agent:
                 await self.run_instruction(message, tag_to_xpath, page)
             except Exception as e:
                 print(tag_to_xpath)
-                print("----")
-                print(page_text)
-                print("----")
                 raise e
 
     async def run_instruction(self, message: Message, tag_to_xpath: dict, page: Page):
@@ -156,12 +170,11 @@ class Agent:
 
 
 async def main():
-    # To create the service account key, follow the instructions on this SO answer https://stackoverflow.com/a/46290808/1780891
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=False)
         agent = Agent(browser)
         result = await agent.run_spec(
-            "Should be able to create a TODO",
+            "Should be able to create and edit a TODO item",
             "https://todomvc.com/examples/react/dist/#/",
         )
         print(result)
