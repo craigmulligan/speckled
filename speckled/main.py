@@ -112,9 +112,7 @@ class Agent:
             if step_count > 10:
                 raise Exception(f"Too many steps to execute spec: {spec_description}")
 
-            await page.wait_for_timeout(500)
             screenshot, tag_to_xpath = await self.tarsier.page_to_image(page)
-            await page.wait_for_timeout(500)
             image_url = bytes_to_image_url(screenshot)
 
             messages.append(
@@ -132,6 +130,9 @@ class Agent:
             # TODO: handle instruction errors
             try:
                 await self.run_instruction(message, tag_to_xpath, page)
+                messages.append(
+                    {"role": "assistant", "content": message.model_dump_json()}
+                )
             except Exception as e:
                 print(tag_to_xpath)
                 raise e
