@@ -77,7 +77,6 @@ def bytes_to_image_url(image: bytes):
     # Construct the data URL
     mime_type = "image/png"  # Adjust this to the correct MIME type of your image
     res = f"data:{mime_type};base64,{base64_encoded_str}"
-    print(res)
     return res
 
 
@@ -157,6 +156,8 @@ class Agent:
             x_path = tag_to_xpath[instruction.id]
             print("xpath: ", x_path)
             await page.locator(x_path).fill(instruction.text)
+            # TODO: right now it's not great at knowing it should hit enter on some inputs
+            # Investigate a way to remove .press("Enter")
             await page.locator(x_path).press("Enter")
 
         await page.wait_for_timeout(500)
@@ -174,7 +175,7 @@ async def main():
         browser = await playwright.chromium.launch(headless=False)
         agent = Agent(browser)
         result = await agent.run_spec(
-            "Should be able to create and edit a TODO item",
+            "Should be able to create, edit and complete a TODO item",
             "https://todomvc.com/examples/react/dist/#/",
         )
         print(result)
