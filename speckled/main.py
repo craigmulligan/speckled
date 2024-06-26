@@ -19,7 +19,9 @@ system_prompt = """
 
     You will initially be given the test specs description.
 
-    You will then be passed a OCR text of a web page where element ids are to the left of elements.
+    You will then be passed a screenshot of the web page tagged with element IDs
+
+    The element IDs are to the left of elements.
 
     In this representation ID's have different prefixes to distinguish what type of elements they are:
         [#ID]: text-insertable fields (e.g. textarea, input with textual type)
@@ -27,11 +29,11 @@ system_prompt = """
         [$ID]: other interactable elements (e.g. button, select)
 
     After receiving the web page content. You must respond with an action which will help you complete the test.
-    You will then receive another web page and continue this process until you complete the test.
+    You will then receive another screenshot and continue this process until you complete the test.
 
     If an instruction fails you will receive an error, to help you retry and correct your action.
 
-    You will judge if the test has passed or failed based on the contents of the incoming webpage.
+    You will judge if the test has passed or failed based on the incoming screenshot.
 
     - You should only respond with with an action in order to drive your test browser and complete the test.
     - You should keep tests short using as few instruction as possible to complete a test.
@@ -71,11 +73,10 @@ client = instructor.from_openai(OpenAI(api_key=config.OPENAI_API_KEY))
 
 
 def bytes_to_image_url(image: bytes):
-    # Convert the bytes object to a base64 encoded string
+    # Construct a base64 image
     base64_encoded_str = base64.b64encode(image).decode("utf-8")
 
-    # Construct the data URL
-    mime_type = "image/png"  # Adjust this to the correct MIME type of your image
+    mime_type = "image/png"
     res = f"data:{mime_type};base64,{base64_encoded_str}"
     return res
 
@@ -174,8 +175,9 @@ async def main():
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=False)
         agent = Agent(browser)
+
         result = await agent.run_spec(
-            "Should be able to create, edit and complete a TODO item",
+            "Should be able to create, edit and delete a TODO item",
             "https://todomvc.com/examples/react/dist/#/",
         )
         print(result)
