@@ -9,7 +9,7 @@ import json
 import instructor
 from openai import OpenAI
 from pydantic import BaseModel, Field
-from .config import config
+from config import config
 
 system_prompt = """
     You are a test-automation agent. You can execute tests by driving a browser using the described instructions API.
@@ -33,7 +33,7 @@ system_prompt = """
     You will judge if the test has passed or failed based on the contents of the incoming webpage. 
 
     - You should only respond with with an action in order to drive your test browser and complete the test.
-    - You should keep tests short using as few steps as possible to complete a test.
+    - You should keep tests short using as few instruction as possible to complete a test.
 """
 
 
@@ -45,19 +45,19 @@ class SpecResult(BaseModel):
 
 class Click(BaseModel):
     type: Literal["click", "double_click"]
-    id: str
+    id: int
 
 
 class TextInput(BaseModel):
     type: Literal["text_input"]
-    id: str
+    id: int
     text: str
 
 
 class KeyInput(BaseModel):
     type: Literal["key_input"]
-    id: str
-    key: str
+    id: int
+    key: Literal["Enter", "Tab"]
 
 
 class Message(BaseModel):
@@ -66,7 +66,7 @@ class Message(BaseModel):
     )
 
 
-client = instructor.from_openai(OpenAI(api_key=config.OPENAI_KEY))
+client = instructor.from_openai(OpenAI(api_key=config.OPENAI_API_KEY))
 
 
 def load_ocr_credentials(json_file_path):
@@ -99,7 +99,12 @@ class Agent:
             if step_count > 10:
                 raise Exception(f"Too many steps to execute spec: {spec_description}")
 
+            await page.wait_for_timeout(500)
             page_text, tag_to_xpath = await self.tarsier.page_to_text(page)
+            print("----")
+            print(page_text)
+            print("----")
+            await page.wait_for_timeout(500)
             messages.append({"role": "user", "content": page_text})
 
             message = await self.ask_llm(messages)
@@ -108,7 +113,14 @@ class Agent:
                 return message.Instruction
 
             # TODO: handle instruction errors
-            await self.run_instruction(message, tag_to_xpath, page)
+            try:
+                await self.run_instruction(message, tag_to_xpath, page)
+            except Exception as e:
+                print(tag_to_xpath)
+                print("----")
+                print(page_text)
+                print("----")
+                raise e
 
     async def run_instruction(self, message: Message, tag_to_xpath: dict, page: Page):
         instruction = message.Instruction
@@ -125,13 +137,13 @@ class Agent:
 
         if isinstance(instruction, KeyInput):
             x_path = tag_to_xpath[instruction.id]
-            print("xpath: ", x_path)
             await page.locator(x_path).press(instruction.key)
 
         if isinstance(instruction, TextInput):
             x_path = tag_to_xpath[instruction.id]
             print("xpath: ", x_path)
-            await page.locator(x_path).press_sequentially(instruction.text)
+            await page.locator(x_path).fill(instruction.text)
+            await page.locator(x_path).press("Enter")
 
         await page.wait_for_timeout(500)
 
