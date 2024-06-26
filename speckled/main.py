@@ -23,13 +23,40 @@ system_prompt = """
 
     The element IDs are to the left of elements.
 
-    In this representation ID's have different prefixes to distinguish what type of elements they are:
+    The ID's have different prefixes to distinguish what type of elements they are:
         [#ID]: text-insertable fields (e.g. textarea, input with textual type)
         [@ID]: hyperlinks (<a> tags)
         [$ID]: other interactable elements (e.g. button, select)
 
-    After receiving the web page content. You must respond with an action which will help you complete the test.
+    After receiving the web page content. You must respond with an instruction which will help you complete the test.
     You will then receive another screenshot and continue this process until you complete the test.
+
+    If an instruction fails you will receive an error, to help you retry and correct your action.
+
+    You will judge if the test has passed or failed based on the incoming screenshot.
+
+    - You should only respond with with an action in order to drive your test browser and complete the test.
+    - You should keep tests short using as few instruction as possible to complete a test.
+"""
+
+system_prompt_ocr = """
+    You are a test-automation agent. You can execute tests by driving a browser using the described instructions API.
+
+    You are to issue instructions required to complete the test in as few steps as possible.
+
+    You will initially be given the test specs description.
+
+    You will then be passed a text representation of the web page tagged with element IDs.
+
+    The element IDs are to the left of elements.
+
+    The ID's have different prefixes to distinguish what type of elements they are:
+        [#ID]: text-insertable fields (e.g. textarea, input with textual type)
+        [@ID]: hyperlinks (<a> tags)
+        [$ID]: other interactable elements (e.g. button, select)
+
+    After receiving the web page content. You must respond with an instruction which will help you complete the test.
+    You will then receive another webpage content and continue this process until you complete the test.
 
     If an instruction fails you will receive an error, to help you retry and correct your action.
 
@@ -97,13 +124,21 @@ class Agent:
         self.browser = browser
 
     async def run_spec(self, spec_description: str, url: str):
+        use_ocr = True
+
         page = await self.browser.new_page()
         await page.goto(url)
 
-        messages: List[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Spec description: {spec_description}"},
-        ]
+        messages: List[ChatCompletionMessageParam] = []
+
+        if use_ocr:
+            messages.append({"role": "system", "content": system_prompt_ocr})
+        else:
+            messages.append({"role": "system", "content": system_prompt})
+
+        messages.append(
+            {"role": "user", "content": f"Spec description: {spec_description}"}
+        )
         step_count = 0
 
         while True:
@@ -112,15 +147,30 @@ class Agent:
             if step_count > 10:
                 raise Exception(f"Too many steps to execute spec: {spec_description}")
 
-            screenshot, tag_to_xpath = await self.tarsier.page_to_image(page)
-            image_url = bytes_to_image_url(screenshot)
+            if use_ocr:
+                page_text, tag_to_xpath = await self.tarsier.page_to_text(page)
+                print("---")
+                print(page_text)
+                print("---")
 
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [{"type": "image_url", "image_url": {"url": image_url}}],
-                }
-            )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": page_text,
+                    }
+                )
+            else:
+                screenshot, tag_to_xpath = await self.tarsier.page_to_image(page)
+                image_url = bytes_to_image_url(screenshot)
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": image_url}}
+                        ],
+                    }
+                )
 
             message = await self.ask_llm(messages)
 
@@ -178,7 +228,7 @@ async def main():
         agent = Agent(browser)
 
         result = await agent.run_spec(
-            "Should be able to create, edit and delete a TODO item",
+            "Should be able to create and complete a TODO",
             "https://todomvc.com/examples/react/dist/#/",
         )
         print(result)
