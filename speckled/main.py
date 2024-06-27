@@ -124,7 +124,7 @@ class Agent:
         self.browser = browser
 
     async def run_spec(self, spec_description: str, url: str):
-        use_ocr = True
+        use_ocr = False 
 
         page = await self.browser.new_page()
         await page.goto(url)
