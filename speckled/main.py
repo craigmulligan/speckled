@@ -10,6 +10,7 @@ import base64
 import instructor
 from openai import OpenAI
 from pydantic import BaseModel, Field
+from tarsier.core import TagToXPath
 from config import config
 
 system_prompt = """
@@ -72,10 +73,21 @@ class SpecResult(BaseModel):
     success: bool
     explanation: str
 
+    async def execute(self, page: Page, tag_to_xpath: TagToXPath):
+        pass
+
 
 class Click(BaseModel):
     type: Literal["click", "double_click"]
     id: int
+
+    async def execute(self, page: Page, tag_to_xpath: TagToXPath):
+        x_path = tag_to_xpath[self.id]
+        print("xpath: ", x_path)
+        if self.type == "double_click":
+            await page.locator(x_path).dblclick()
+        else:
+            await page.locator(x_path).click()
 
 
 class TextInput(BaseModel):
@@ -83,11 +95,23 @@ class TextInput(BaseModel):
     id: int
     text: str
 
+    async def execute(self, page: Page, tag_to_xpath: TagToXPath):
+        x_path = tag_to_xpath[self.id]
+        print("xpath: ", x_path)
+        await page.locator(x_path).fill(self.text)
+        # TODO: right now it's not great at knowing it should hit enter on some inputs
+        # Investigate a way to remove .press("Enter")
+        await page.locator(x_path).press("Enter")
+
 
 class KeyInput(BaseModel):
     type: Literal["single_key_input"]
     id: int
     key: str
+
+    async def execute(self, page: Page, tag_to_xpath: TagToXPath):
+        x_path = tag_to_xpath[self.id]
+        await page.locator(x_path).press(self.key)
 
 
 class Message(BaseModel):
@@ -124,7 +148,7 @@ class Agent:
         self.browser = browser
 
     async def run_spec(self, spec_description: str, url: str):
-        use_ocr = False 
+        use_ocr = False
 
         page = await self.browser.new_page()
         await page.goto(url)
@@ -149,10 +173,6 @@ class Agent:
 
             if use_ocr:
                 page_text, tag_to_xpath = await self.tarsier.page_to_text(page)
-                print("---")
-                print(page_text)
-                print("---")
-
                 messages.append(
                     {
                         "role": "user",
@@ -174,12 +194,15 @@ class Agent:
 
             message = await self.ask_llm(messages)
 
-            if isinstance(message.Instruction, SpecResult):
-                return message.Instruction
+            instruction = message.Instruction
+
+            if isinstance(instruction, SpecResult):
+                return instruction
 
             # TODO: handle instruction errors
             try:
-                await self.run_instruction(message, tag_to_xpath, page)
+                print(f"new instruction: {instruction}")
+                await instruction.execute(page, tag_to_xpath)
                 messages.append(
                     {"role": "assistant", "content": message.model_dump_json()}
                 )
@@ -187,32 +210,7 @@ class Agent:
                 print(tag_to_xpath)
                 raise e
 
-    async def run_instruction(self, message: Message, tag_to_xpath: dict, page: Page):
-        instruction = message.Instruction
-
-        print(f"running instruction: {instruction}")
-
-        if isinstance(instruction, Click):
-            x_path = tag_to_xpath[instruction.id]
-            print("xpath: ", x_path)
-            if instruction.type == "double_click":
-                await page.locator(x_path).dblclick()
-            else:
-                await page.locator(x_path).click()
-
-        if isinstance(instruction, KeyInput):
-            x_path = tag_to_xpath[instruction.id]
-            await page.locator(x_path).press(instruction.key)
-
-        if isinstance(instruction, TextInput):
-            x_path = tag_to_xpath[instruction.id]
-            print("xpath: ", x_path)
-            await page.locator(x_path).fill(instruction.text)
-            # TODO: right now it's not great at knowing it should hit enter on some inputs
-            # Investigate a way to remove .press("Enter")
-            await page.locator(x_path).press("Enter")
-
-        await page.wait_for_timeout(500)
+            await page.wait_for_timeout(500)
 
     async def ask_llm(self, messages: List[ChatCompletionMessageParam]) -> Message:
         return client.chat.completions.create(
